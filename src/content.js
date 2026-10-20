@@ -1,3 +1,5 @@
+const extensionApi = typeof browser !== 'undefined' ? browser : chrome;
+
 function initPopupRemover() {
   document.getElementById('notRemoverPopup')?.remove();
   if (document.body) {
@@ -169,25 +171,26 @@ function createExamInputUI() {
 
 async function findQuestion(exam, topic, question) {
   try {
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage(
-        { action: 'searchQuestion', exam, topic, question },
-        (response) => {
-          if (chrome.runtime.lastError) {
-            console.error('Message error:', chrome.runtime.lastError);
-            resolve({ url: null, captcha: false, error: 'Search is unavailable. Reload the extension and try again.' });
-          } else {
-            const captcha = Boolean(response && response.captcha);
-            const captchaUrl = response && response.captchaUrl ? response.captchaUrl : null;
-            const url = response && response.url ? response.url : null;
-            resolve({ url, captcha, captchaUrl, error: response?.error, searchUrl: response?.searchUrl });
-          }
-        }
-      );
-    });
+    const request = { action: 'searchQuestion', exam, topic, question };
+    const response = typeof browser !== 'undefined'
+      ? await extensionApi.runtime.sendMessage(request)
+      : await new Promise((resolve, reject) => {
+          chrome.runtime.sendMessage(request, result => {
+            if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
+            else resolve(result);
+          });
+        });
+    if (!response) throw new Error('No search response');
+    return {
+      url: response.url || null,
+      captcha: Boolean(response.captcha),
+      captchaUrl: response.captchaUrl || null,
+      error: response.error,
+      searchUrl: response.searchUrl
+    };
   } catch (error) {
     console.error('Search error:', error);
-    return { url: null, captcha: false, captchaUrl: null, error: 'Search failed. Please retry.' };
+    return { url: null, captcha: false, error: 'Search is unavailable. Reload the extension and try again.' };
   }
 }
 
@@ -535,7 +538,7 @@ window.addEventListener('load', () => {
   }
 });
 
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+extensionApi.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (!request || !request.action) {
     return;
   }

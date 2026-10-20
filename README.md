@@ -3,7 +3,7 @@
 ## Summary
 ExamTopics Navigator is a Chrome extension that helps you quickly move between ExamTopics questions and topics and jump to a specific exam code, topic, and question.
 
-## Installation (Chrome)
+## Installation (Chrome / Firefox)
 0. Download or clone this repository
 1. Open Chrome and go to chrome://extensions
 2. Enable Developer mode (top right corner toogle)
@@ -11,8 +11,10 @@ ExamTopics Navigator is a Chrome extension that helps you quickly move between E
 4. Select this project folder: ExamTopicsExtension
 5. Pin the extension (optional) so the popup is easy to access
 
+For Firefox, open `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on**, and select `manifest.json` in this folder. Temporary add-ons are removed when Firefox closes; install a signed package for persistent use.
+
 To update after changes:
-> Go to chrome://extensions and click Reload on the extension card
+> In Chrome, go to `chrome://extensions` and click Reload on the extension card. In Firefox, use Reload in `about:debugging#/runtime/this-firefox`, then refresh any open ExamTopics tabs.
 
 ## Usage
 ### On ExamTopics pages

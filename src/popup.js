@@ -1,3 +1,12 @@
+const extensionApi = typeof browser !== 'undefined' ? browser : chrome;
+
+function activeTab() {
+    if (typeof browser !== 'undefined') {
+        return extensionApi.tabs.query({ active: true, currentWindow: true }).then(tabs => tabs[0]);
+    }
+    return new Promise(resolve => chrome.tabs.query({ active: true, currentWindow: true }, tabs => resolve(tabs[0])));
+}
+
 function showStatus(message, type = 'info') {
     const statusEl = document.getElementById('status');
     statusEl.replaceChildren();
@@ -11,53 +20,51 @@ function clearStatus() {
 }
 
 async function checkCurrentPage() {
-    return new Promise((resolve) => {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            const url = tabs[0]?.url || '';
-            let pageUrl;
-            try {
-                pageUrl = new URL(url);
-            } catch {
-                resolve({ isExamTopics: false, isExamPage: false });
-                return;
-            }
+    const tab = await activeTab();
+    const url = tab?.url || '';
+    let pageUrl;
+    try {
+        pageUrl = new URL(url);
+    } catch {
+        return { isExamTopics: false, isExamPage: false };
+    }
 
-            const isExamTopics = pageUrl.protocol === 'https:' &&
-                (pageUrl.hostname === 'examtopics.com' || pageUrl.hostname === 'www.examtopics.com');
-            const match = isExamTopics && pageUrl.pathname.match(/exam-(.+?)-topic-(\d+)-question-(\d+)-discussion/);
-            const examView = isExamTopics && pageUrl.pathname.match(/^\/exams\/[^/]+\/([^/]+)\/view\//i);
-            
-            if (match) {
-                resolve({
-                    isExamPage: true,
-                    isExamTopics: true,
-                    exam: match[1],
-                    topic: parseInt(match[2]),
-                    question: parseInt(match[3])
-                });
-            } else {
-                resolve({ isExamTopics, isExamPage: false, exam: examView ? examView[1] : null });
-            }
-        });
-    });
+    const isExamTopics = pageUrl.protocol === 'https:' &&
+        (pageUrl.hostname === 'examtopics.com' || pageUrl.hostname === 'www.examtopics.com');
+    const match = isExamTopics && pageUrl.pathname.match(/exam-(.+?)-topic-(\d+)-question-(\d+)-discussion/);
+    const examView = isExamTopics && pageUrl.pathname.match(/^\/exams\/[^/]+\/([^/]+)\/view\//i);
+
+    if (match) {
+        return {
+            isExamPage: true,
+            isExamTopics: true,
+            exam: match[1],
+            topic: parseInt(match[2]),
+            question: parseInt(match[3])
+        };
+    }
+    return { isExamTopics, isExamPage: false, exam: examView ? examView[1] : null };
 }
 
 async function sendMessageToContent(action, data) {
-    return new Promise((resolve) => {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (!tabs[0]) {
-                resolve({ message: 'No active tab found.', status: 'error' });
-                return;
-            }
-            chrome.tabs.sendMessage(tabs[0].id, { action, ...data }, (response) => {
-                if (chrome.runtime.lastError) {
-                    resolve({ message: 'Cannot reach this page. Reload the ExamTopics tab and try again.', status: 'error' });
-                } else {
-                    resolve(response || { message: 'Search failed. Please try again.', status: 'error' });
-                }
+    const tab = await activeTab();
+    if (!tab) return { message: 'No active tab found.', status: 'error' };
+    try {
+        let response;
+        if (typeof browser !== 'undefined') {
+            response = await extensionApi.tabs.sendMessage(tab.id, { action, ...data });
+        } else {
+            response = await new Promise((resolve, reject) => {
+                chrome.tabs.sendMessage(tab.id, { action, ...data }, result => {
+                    if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
+                    else resolve(result);
+                });
             });
-        });
-    });
+        }
+        return response || { message: 'Search failed. Please try again.', status: 'error' };
+    } catch {
+        return { message: 'Cannot reach this page. Reload the ExamTopics tab and try again.', status: 'error' };
+    }
 }
 
 async function runNavigation(action, data) {
@@ -85,7 +92,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const openExamTopics = document.getElementById('open-examtopics');
         if (openExamTopics) {
             openExamTopics.addEventListener('click', () => {
-                chrome.tabs.create({ url: 'https://www.examtopics.com' });
+                extensionApi.tabs.create({ url: 'https://www.examtopics.com' });
             });
         }
         return;
@@ -150,7 +157,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('topic-input').addEventListener('focus', clearStatus);
     document.getElementById('question-input').addEventListener('focus', clearStatus);
 });
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+extensionApi.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.type === 'status-update') {
         showStatus(request.message, request.status);
     }
