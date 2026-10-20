@@ -146,6 +146,10 @@ button:active {
   background: #0b6a0b;
 }
 
+#exam-input-section > .input-field {
+  margin-bottom: 8px;
+}
+
 .status {
   text-align: center;
   font-size: 12px;

@@ -175,19 +175,19 @@ async function findQuestion(exam, topic, question) {
         (response) => {
           if (chrome.runtime.lastError) {
             console.error('Message error:', chrome.runtime.lastError);
-            resolve({ url: null, captcha: false });
+            resolve({ url: null, captcha: false, error: 'Search is unavailable. Reload the extension and try again.' });
           } else {
             const captcha = Boolean(response && response.captcha);
             const captchaUrl = response && response.captchaUrl ? response.captchaUrl : null;
             const url = response && response.url ? response.url : null;
-            resolve({ url, captcha, captchaUrl });
+            resolve({ url, captcha, captchaUrl, error: response?.error, searchUrl: response?.searchUrl });
           }
         }
       );
     });
   } catch (error) {
     console.error('Search error:', error);
-    return { url: null, captcha: false, captchaUrl: null };
+    return { url: null, captcha: false, captchaUrl: null, error: 'Search failed. Please retry.' };
   }
 }
 
@@ -198,7 +198,7 @@ async function navigateToQuestion(topic, question) {
   if (!info.success) {
     statusDiv.textContent = 'Error: Could not parse current page';
     statusDiv.style.color = '#d13438';
-    return;
+    return { message: statusDiv.textContent, status: 'error' };
   }
 
   statusDiv.textContent = 'Searching...';
@@ -206,16 +206,22 @@ async function navigateToQuestion(topic, question) {
 
   let currentTopic = topic;
   let found = null;
+  let searchUrl = null;
 
   for (let i = 1; i <= 3; i++) {
     const searchQuestion = question + i;
     const result = await findQuestion(info.exam, currentTopic, searchQuestion);
     if (result.captcha) {
       showCaptchaMessage(statusDiv, result.captchaUrl);
-      return;
+      return { captchaUrl: result.captchaUrl };
+    }
+    if (result.error) {
+      statusDiv.textContent = result.error;
+      return { message: result.error, status: 'error' };
     }
 
     found = result.url;
+    searchUrl ||= result.searchUrl;
     if (found) {
       break;
     }
@@ -226,7 +232,11 @@ async function navigateToQuestion(topic, question) {
     const result = await findQuestion(info.exam, currentTopic, 1);
     if (result.captcha) {
       showCaptchaMessage(statusDiv, result.captchaUrl);
-      return;
+      return { captchaUrl: result.captchaUrl };
+    }
+    if (result.error) {
+      statusDiv.textContent = result.error;
+      return { message: result.error, status: 'error' };
     }
 
     found = result.url;
@@ -239,9 +249,10 @@ async function navigateToQuestion(topic, question) {
       window.location.href = found;
     }, 500);
   } else {
-    statusDiv.textContent = 'Last question reached!';
+    statusDiv.textContent = 'No matching question found in search results. This does not mean it is the last question.';
     statusDiv.style.color = '#d13438';
   }
+  return { message: statusDiv.textContent, status: found ? 'success' : 'error', searchUrl: found ? null : searchUrl };
 }
 
 async function navigateToPreviousQuestion(topic, question) {
@@ -251,7 +262,7 @@ async function navigateToPreviousQuestion(topic, question) {
   if (!info.success) {
     statusDiv.textContent = 'Error: Could not parse current page';
     statusDiv.style.color = '#d13438';
-    return;
+    return { message: statusDiv.textContent, status: 'error' };
   }
 
   statusDiv.textContent = 'Searching...';
@@ -267,7 +278,7 @@ async function navigateToPreviousQuestion(topic, question) {
     const result = await findQuestion(info.exam, currentTopic, searchQuestion);
     if (result.captcha) {
       showCaptchaMessage(statusDiv, result.captchaUrl);
-      return;
+      return { captchaUrl: result.captchaUrl };
     }
 
     found = result.url;
@@ -282,7 +293,7 @@ async function navigateToPreviousQuestion(topic, question) {
       const result = await findQuestion(info.exam, currentTopic, q);
       if (result.captcha) {
         showCaptchaMessage(statusDiv, result.captchaUrl);
-        return;
+        return { captchaUrl: result.captchaUrl };
       }
 
       found = result.url;
@@ -302,6 +313,7 @@ async function navigateToPreviousQuestion(topic, question) {
     statusDiv.textContent = 'First question reached!';
     statusDiv.style.color = '#d13438';
   }
+  return { message: statusDiv.textContent, status: found ? 'success' : 'error' };
 }
 
 async function navigateToExactQuestion(topic, question) {
@@ -311,7 +323,7 @@ async function navigateToExactQuestion(topic, question) {
   if (!info.success) {
     statusDiv.textContent = 'Error: Could not parse current page';
     statusDiv.style.color = '#d13438';
-    return;
+    return { message: statusDiv.textContent, status: 'error' };
   }
 
   statusDiv.textContent = 'Searching...';
@@ -320,7 +332,7 @@ async function navigateToExactQuestion(topic, question) {
   const result = await findQuestion(info.exam, topic, question);
   if (result.captcha) {
     showCaptchaMessage(statusDiv, result.captchaUrl);
-    return;
+    return { captchaUrl: result.captchaUrl };
   }
 
   if (result.url) {
@@ -333,6 +345,12 @@ async function navigateToExactQuestion(topic, question) {
     statusDiv.textContent = 'Question not found';
     statusDiv.style.color = '#d13438';
   }
+  return { message: statusDiv.textContent, status: result.url ? 'success' : 'error' };
+}
+
+function parseExamViewUrl() {
+  const match = window.location.pathname.match(/^\/exams\/[^/]+\/([^/]+)\/view\//i);
+  return match ? match[1].toLowerCase() : null;
 }
 
 async function navigateToExam(exam, topic, question) {
@@ -341,22 +359,38 @@ async function navigateToExam(exam, topic, question) {
   if (!exam || exam.trim() === '') {
     statusDiv.innerHTML = 'Please enter exam code';
     statusDiv.style.color = '#d13438';
-    return;
+    return { message: 'Please enter exam code', status: 'error' };
   }
 
   if (topic < 1 || question < 1) {
     statusDiv.innerHTML = 'Invalid topic or question';
     statusDiv.style.color = '#d13438';
-    return;
+    return { message: 'Invalid topic or question', status: 'error' };
   }
 
   statusDiv.innerHTML = 'Searching...';
   statusDiv.style.color = '#0078d4';
 
+  // The exam view already contains its first ten questions; no search is needed.
+  if (parseExamViewUrl() === exam.toLowerCase() && topic === 1) {
+    const target = document.getElementById(`qqq${question}`);
+    if (target) {
+      target.scrollIntoView();
+      statusDiv.textContent = `Question ${question} is on this page.`;
+      statusDiv.style.color = '#107c10';
+      return { message: statusDiv.textContent, status: 'success' };
+    }
+  }
+
   const firstResult = await findQuestion(exam, topic, question);
   if (firstResult.captcha) {
     showCaptchaMessage(statusDiv, firstResult.captchaUrl);
-    return;
+    return { captchaUrl: firstResult.captchaUrl };
+  }
+  if (firstResult.error) {
+    statusDiv.textContent = firstResult.error;
+    statusDiv.style.color = '#d13438';
+    return { message: firstResult.error, status: 'error' };
   }
 
   let found = firstResult.url;
@@ -365,7 +399,7 @@ async function navigateToExam(exam, topic, question) {
       const result = await findQuestion(exam, topic, question + i);
       if (result.captcha) {
         showCaptchaMessage(statusDiv, result.captchaUrl);
-        return;
+        return { captchaUrl: result.captchaUrl };
       }
 
       found = result.url;
@@ -379,7 +413,7 @@ async function navigateToExam(exam, topic, question) {
     const result = await findQuestion(exam, topic + 1, 1);
     if (result.captcha) {
       showCaptchaMessage(statusDiv, result.captchaUrl);
-      return;
+      return { captchaUrl: result.captchaUrl };
     }
 
     found = result.url;
@@ -392,15 +426,10 @@ async function navigateToExam(exam, topic, question) {
       window.location.href = found;
     }, 500);
   } else {
-    statusDiv.innerHTML = `
-      Exam not found. This extension only works on examtopics.com<br><br>
-      <button id="go-examtopics-btn" class="etn-action-btn">Visit ExamTopics.com</button>
-    `;
+    statusDiv.textContent = 'Question not found in search results. Try another question or retry later.';
     statusDiv.style.color = '#d13438';
-    document.getElementById('go-examtopics-btn')?.addEventListener('click', () => {
-      window.location.href = 'https://www.examtopics.com';
-    });
   }
+  return { message: statusDiv.textContent, status: found ? 'success' : 'error' };
 }
 
 function initializeUI() {
@@ -511,15 +540,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return;
   }
 
+  let navigation;
   if (request.action === 'next-question') {
-    navigateToQuestion(request.topic, request.question + 1);
+    navigation = navigateToQuestion(request.topic, request.question);
   }
 
   if (request.action === 'prev-question') {
-    navigateToPreviousQuestion(request.topic, request.question);
+    navigation = navigateToPreviousQuestion(request.topic, request.question);
   }
 
   if (request.action === 'go-to-question') {
-    navigateToExactQuestion(request.topic, request.question);
+    navigation = navigateToExactQuestion(request.topic, request.question);
+  }
+
+  if (request.action === 'go-to-exam') {
+    navigation = navigateToExam(request.exam, request.topic, request.question);
+  }
+
+  if (navigation) {
+    navigation.then(sendResponse).catch(error => {
+      console.error('Navigation error:', error);
+      sendResponse({ message: 'Search failed. Please try again.', status: 'error' });
+    });
+    return true;
   }
 });

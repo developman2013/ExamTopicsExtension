@@ -10,6 +10,7 @@
     "webRequest"
   ],
   "host_permissions": [
+    "https://examtopics.com/*",
     "https://www.examtopics.com/*",
     "https://www.google.com/*"
   ],
@@ -18,7 +19,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.examtopics.com/*"],
+      "matches": ["https://examtopics.com/*", "https://www.examtopics.com/*"],
       "js": ["src/content.js"],
       "css": ["src/content.css"],
       "run_at": "document_start"

@@ -45,6 +45,24 @@
                 <button class="btn-go" id="btn-go">Go To Question</button>
             </div>
 
+            <div id="exam-input-section" class="is-hidden">
+                <div class="input-field">
+                    <label for="exam-code-input">Exam Code (e.g. az-900)</label>
+                    <input type="text" id="exam-code-input" placeholder="az-900">
+                </div>
+                <div class="input-group">
+                    <div class="input-field">
+                        <label for="exam-topic-input">Topic Number</label>
+                        <input type="number" id="exam-topic-input" min="1" value="1">
+                    </div>
+                    <div class="input-field">
+                        <label for="exam-question-input">Question Number</label>
+                        <input type="number" id="exam-question-input" min="1" value="1">
+                    </div>
+                </div>
+                <button class="btn-go" id="btn-go-exam">Go To Exam</button>
+            </div>
+
             <div class="status" id="status"></div>
 
             <div class="not-on-exam is-hidden" id="not-on-exam">

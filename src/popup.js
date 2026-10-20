@@ -1,6 +1,7 @@
 function showStatus(message, type = 'info') {
     const statusEl = document.getElementById('status');
-    statusEl.textContent = message;
+    statusEl.replaceChildren();
+    statusEl.append(document.createTextNode(message));
     statusEl.className = `status active ${type}`;
 }
 
@@ -12,20 +13,30 @@ function clearStatus() {
 async function checkCurrentPage() {
     return new Promise((resolve) => {
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            const tab = tabs[0];
-            const url = tab.url || '';
-            
-            const match = url.match(/exam-(.+?)-topic-(\d+)-question-(\d+)-discussion/);
+            const url = tabs[0]?.url || '';
+            let pageUrl;
+            try {
+                pageUrl = new URL(url);
+            } catch {
+                resolve({ isExamTopics: false, isExamPage: false });
+                return;
+            }
+
+            const isExamTopics = pageUrl.protocol === 'https:' &&
+                (pageUrl.hostname === 'examtopics.com' || pageUrl.hostname === 'www.examtopics.com');
+            const match = isExamTopics && pageUrl.pathname.match(/exam-(.+?)-topic-(\d+)-question-(\d+)-discussion/);
+            const examView = isExamTopics && pageUrl.pathname.match(/^\/exams\/[^/]+\/([^/]+)\/view\//i);
             
             if (match) {
                 resolve({
                     isExamPage: true,
+                    isExamTopics: true,
                     exam: match[1],
                     topic: parseInt(match[2]),
                     question: parseInt(match[3])
                 });
             } else {
-                resolve({ isExamPage: false });
+                resolve({ isExamTopics, isExamPage: false, exam: examView ? examView[1] : null });
             }
         });
     });
@@ -34,33 +45,69 @@ async function checkCurrentPage() {
 async function sendMessageToContent(action, data) {
     return new Promise((resolve) => {
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs[0]) {
-                chrome.tabs.sendMessage(tabs[0].id, { action, ...data }, (response) => {
-                    if (chrome.runtime.lastError) {
-                        resolve(null);
-                    } else {
-                        resolve(response);
-                    }
-                });
+            if (!tabs[0]) {
+                resolve({ message: 'No active tab found.', status: 'error' });
+                return;
             }
+            chrome.tabs.sendMessage(tabs[0].id, { action, ...data }, (response) => {
+                if (chrome.runtime.lastError) {
+                    resolve({ message: 'Cannot reach this page. Reload the ExamTopics tab and try again.', status: 'error' });
+                } else {
+                    resolve(response || { message: 'Search failed. Please try again.', status: 'error' });
+                }
+            });
         });
     });
+}
+
+async function runNavigation(action, data) {
+    showStatus('Searching...', 'info');
+    const result = await sendMessageToContent(action, data);
+    if (result.captchaUrl) {
+        showStatus('Captcha detected. Complete it in the opened tab, then retry.', 'error');
+    } else {
+        showStatus(result.message, result.status);
+        if (result.searchUrl) {
+            const link = document.createElement('a');
+            link.href = result.searchUrl;
+            link.textContent = 'View Google results';
+            link.target = '_blank';
+            document.getElementById('status').append(document.createElement('br'), link);
+        }
+    }
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
     const pageInfo = await checkCurrentPage();
 
-    if (!pageInfo.isExamPage) {
+    if (!pageInfo.isExamTopics) {
         document.getElementById('not-on-exam').classList.remove('is-hidden');
-        document.getElementById('info-section').classList.add('is-hidden');
-        document.getElementById('nav-buttons').classList.add('is-hidden');
-        document.getElementById('input-section').classList.add('is-hidden');
         const openExamTopics = document.getElementById('open-examtopics');
         if (openExamTopics) {
             openExamTopics.addEventListener('click', () => {
                 chrome.tabs.create({ url: 'https://www.examtopics.com' });
             });
         }
+        return;
+    }
+
+    if (!pageInfo.isExamPage) {
+        document.getElementById('exam-input-section').classList.remove('is-hidden');
+        if (pageInfo.exam) {
+            document.getElementById('exam-code-input').value = pageInfo.exam.toUpperCase();
+        }
+        document.getElementById('btn-go-exam').addEventListener('click', () => {
+            const exam = document.getElementById('exam-code-input').value.trim();
+            const topic = Number(document.getElementById('exam-topic-input').value);
+            const question = Number(document.getElementById('exam-question-input').value);
+
+            if (!exam || !Number.isInteger(topic) || topic < 1 || !Number.isInteger(question) || question < 1) {
+                showStatus('Enter an exam code and valid topic and question numbers', 'error');
+                return;
+            }
+
+            runNavigation('go-to-exam', { exam, topic, question });
+        });
         return;
     }
 
@@ -75,16 +122,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('input-section').classList.remove('is-hidden');
 
     document.getElementById('btn-next').addEventListener('click', () => {
-        showStatus('Searching...', 'info');
-        sendMessageToContent('next-question', {
+        runNavigation('next-question', {
             topic: pageInfo.topic,
             question: pageInfo.question
         });
     });
 
     document.getElementById('btn-prev').addEventListener('click', () => {
-        showStatus('Searching...', 'info');
-        sendMessageToContent('prev-question', {
+        runNavigation('prev-question', {
             topic: pageInfo.topic,
             question: pageInfo.question
         });
@@ -99,8 +144,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-        showStatus('Searching...', 'info');
-        sendMessageToContent('go-to-question', { topic, question });
+        runNavigation('go-to-question', { topic, question });
     });
 
     document.getElementById('topic-input').addEventListener('focus', clearStatus);
